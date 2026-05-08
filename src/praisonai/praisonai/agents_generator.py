@@ -15,6 +15,7 @@ import os
 import logging
 import re
 import keyword
+import difflib
 
 # Import new architecture components
 from .framework_adapters.base import FrameworkAdapter
@@ -319,6 +320,47 @@ class AgentsGenerator:
                     agent_config[field] = value
                     self.logger.debug(f"CLI override for agent {agent_name}: {field} = {value}")
 
+    def _validate_agents_config(self, config):
+        """
+        Validate agent configuration for typos in field names and provide suggestions.
+        
+        Args:
+            config (dict): The parsed YAML configuration
+        """
+        known_fields = {
+            'role', 'goal', 'instructions', 'backstory', 'tools', 'tasks', 'llm',
+            'function_calling_llm', 'allow_delegation', 'max_iter', 'max_rpm',
+            'max_execution_time', 'verbose', 'cache', 'system_template',
+            'prompt_template', 'response_template', 'tool_timeout', 'planning_tools',
+            'planning', 'autonomy', 'guardrails', 'streaming', 'stream',
+            'approval', 'skills', 'cli_backend', 'reflection'
+        }
+
+        for section_name in ('agents', 'roles'):
+            section = config.get(section_name, {})
+            if not isinstance(section, dict):
+                continue
+
+            entity_name = 'agent' if section_name == 'agents' else 'role'
+            for name, section_config in section.items():
+                if not isinstance(section_config, dict):
+                    continue
+
+                for field_name in section_config:
+                    if field_name in known_fields:
+                        continue
+
+                    close_matches = difflib.get_close_matches(
+                        field_name,
+                        known_fields,
+                        n=1,
+                        cutoff=0.6
+                    )
+                    suggestion = f" Did you mean '{close_matches[0]}'?" if close_matches else ""
+                    self.logger.warning(
+                        f"Unknown field '{field_name}' in {entity_name} '{name}'.{suggestion}"
+                    )
+
     def is_function_or_decorated(self, obj):
         """
         Checks if the given object is a function or has a __call__ method.
@@ -504,6 +546,10 @@ class AgentsGenerator:
 
         # Get workflow input: 'input' is canonical, 'topic' is alias for backward compatibility
         topic = config.get('input', config.get('topic', ''))
+        
+        # Validate agents configuration for typos in field names
+        self._validate_agents_config(config)
+        
         tools_dict = {}
         
         # Use ToolResolver to get available tools (consistent tool resolution)
