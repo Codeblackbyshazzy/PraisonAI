@@ -170,7 +170,7 @@ class TestStopTimeoutCancelPath:
         scheduler._ensure_async_primitives()
 
         # Simulate a task that raises a plain Exception when awaited after cancel
-        future = asyncio.get_event_loop().create_future()
+        future = asyncio.get_running_loop().create_future()
         future.set_exception(RuntimeError("task blew up"))
         scheduler._task = future
         scheduler._stop_event.set()
@@ -273,7 +273,7 @@ class TestAsyncAgentSchedulerLifecycle:
     @pytest.mark.asyncio
     async def test_get_stats_initial_state(self):
         scheduler = _make_scheduler()
-        stats = scheduler.get_stats()
+        stats = await scheduler.get_stats()
         assert stats["is_running"] is False
         assert stats["total_executions"] == 0
         assert stats["successful_executions"] == 0

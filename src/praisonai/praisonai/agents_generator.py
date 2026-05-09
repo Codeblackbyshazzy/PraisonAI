@@ -43,10 +43,12 @@ except ImportError:
 # Check for additional framework availability
 AG2_AVAILABLE = False
 PRAISONAI_AVAILABLE = False
+AGENTOPS_AVAILABLE = False
 try:
     import importlib.util
     AG2_AVAILABLE = importlib.util.find_spec("ag2") is not None
     PRAISONAI_AVAILABLE = importlib.util.find_spec("praisonaiagents") is not None
+    AGENTOPS_AVAILABLE = importlib.util.find_spec("agentops") is not None
 except ImportError:
     pass
 
@@ -375,20 +377,19 @@ class AgentsGenerator:
 
     def load_tools_from_module(self, module_path):
         """
-        Loads tools from a specified module path.
+        Load function tools from a user-supplied module (gated by PRAISONAI_ALLOW_LOCAL_TOOLS).
 
         Parameters:
             module_path (str): The path to the module containing the tools.
 
         Returns:
             dict: A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.
-
-        Raises:
-            FileNotFoundError: If the specified module path does not exist.
+                  Returns an empty dict if the module cannot be loaded (path missing, loading blocked by PRAISONAI_ALLOW_LOCAL_TOOLS, or any other load error).
         """
-        spec = importlib.util.spec_from_file_location("tools_module", module_path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        from ._safe_loader import load_user_module
+        module = load_user_module(module_path, name="tools_module")
+        if module is None:
+            return {}
         return {name: obj for name, obj in inspect.getmembers(module, self.is_function_or_decorated)}
     
     def _extract_tool_classes(self, module):
@@ -411,21 +412,13 @@ class AgentsGenerator:
     
     def load_tools_from_module_class(self, module_path):
         """
-        Loads tools from a specified module path containing classes that inherit from BaseTool 
-        or are part of langchain_community.tools package.
+        Load BaseTool / langchain tool classes from a user-supplied module (gated by PRAISONAI_ALLOW_LOCAL_TOOLS).
         """
-        spec = importlib.util.spec_from_file_location("tools_module", module_path)
-        module = importlib.util.module_from_spec(spec)
-        try:
-            spec.loader.exec_module(module)
-            return {name: obj() for name, obj in inspect.getmembers(module, 
-                lambda x: inspect.isclass(x) and (
-                    x.__module__.startswith('langchain_community.tools') or 
-                    (PRAISONAI_TOOLS_AVAILABLE and BaseTool and issubclass(x, BaseTool))
-                ) and x is not BaseTool)}
-        except ImportError as e:
-            self.logger.warning(f"Error loading tools from {module_path}: {e}")
+        from ._safe_loader import load_user_module
+        module = load_user_module(module_path, name="tools_module")
+        if module is None:
             return {}
+        return self._extract_tool_classes(module)
 
     def load_tools_from_package(self, package_path):
         """
@@ -784,7 +777,11 @@ class AgentsGenerator:
         result = "### Output ###\n" + response[-1].summary if hasattr(response[-1], 'summary') else ""
         
         if AGENTOPS_AVAILABLE:
-            agentops.end_session("Success")
+            import agentops
+            try:
+                agentops.end_session("Success")
+            except Exception as e:  # noqa: BLE001 -- agentops errors must not crash the caller
+                self.logger.warning(f"agentops.end_session failed: {e}")
             
         return result
 
@@ -1171,7 +1168,11 @@ class AgentsGenerator:
         result = f"### Task Output ###\n{response}"
         
         if AGENTOPS_AVAILABLE:
-            agentops.end_session("Success")
+            import agentops
+            try:
+                agentops.end_session("Success")
+            except Exception as e:  # noqa: BLE001 -- agentops errors must not crash the caller
+                self.logger.warning(f"agentops.end_session failed: {e}")
             
         return result
 
@@ -1479,6 +1480,10 @@ class AgentsGenerator:
                     self.logger.error(f"Error stopping InteractiveRuntime: {e}")
         
         if AGENTOPS_AVAILABLE:
-            agentops.end_session("Success")
+            import agentops
+            try:
+                agentops.end_session("Success")
+            except Exception as e:  # noqa: BLE001 -- agentops errors must not crash the caller
+                self.logger.warning(f"agentops.end_session failed: {e}")
             
         return result
